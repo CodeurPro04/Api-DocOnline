@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Medecin;
+use App\Models\Clinique;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Storage;
@@ -23,33 +24,65 @@ class MedecinAuthController extends Controller
             'bio' => 'nullable|string',
             'password' => 'required|string|min:6',
             'photo_profil' => 'nullable|image|mimes:jpg,jpeg,png|max:2048',
+            'type' => 'required|string|in:independant,clinique',
+            'clinique_id' => 'required_if:type,clinique|exists:cliniques,id',
+            'fonction' => 'nullable|string|max:255',
         ]);
 
-        $data = [
-            'nom' => $request->nom,
-            'prenom' => $request->prenom,
-            'email' => $request->email,
-            'telephone' => $request->telephone,
-            'specialite' => $request->specialite,
-            'address' => $request->address,
-            'bio' => $request->bio,
-            'password' => Hash::make($request->password),
-        ];
+        try {
+            $data = [
+                'nom' => $request->nom,
+                'prenom' => $request->prenom,
+                'email' => $request->email,
+                'telephone' => $request->telephone,
+                'specialite' => $request->specialite,
+                'address' => $request->address,
+                'bio' => $request->bio,
+                'password' => Hash::make($request->password),
+                'type' => $request->type, // Utilise directement 'type'
+            ];
 
-        if ($request->hasFile('photo_profil')) {
-            $data['photo_profil'] = $request->file('photo_profil')->store('photos/medecins', 'public');
+            // Si le médecin est rattaché à une clinique, assigner l'ID de la clinique
+            if ($request->type === 'clinique' && $request->clinique_id) {
+                $data['clinique_id'] = $request->clinique_id;
+            }
+
+            if ($request->hasFile('photo_profil')) {
+                $data['photo_profil'] = $request->file('photo_profil')->store('photos/medecins', 'public');
+            }
+
+            $medecin = Medecin::create($data);
+
+            // Si le médecin est rattaché à une clinique, l'ajouter à la relation many-to-many
+            if ($request->type === 'clinique' && $request->clinique_id) {
+                $clinique = Clinique::findOrFail($request->clinique_id);
+
+                // Vérifier si la relation many-to-many existe et attacher le médecin
+                if (method_exists($clinique, 'medecins')) {
+                    $clinique->medecins()->attach($medecin->id, [
+                        'fonction' => $request->fonction ?? 'Médecin',
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            }
+
+            $token = $medecin->createToken('auth_token')->plainTextToken;
+
+            return response()->json([
+                'access_token' => $token,
+                'token_type' => 'Bearer',
+                'medecin' => $medecin,
+                'photo_url' => $medecin->photo_profil ? asset('storage/' . $medecin->photo_profil) : null,
+                'type' => $medecin->type, // Retourne 'type'
+                'clinique_id' => $medecin->clinique_id,
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Erreur lors de l\'inscription',
+                'message' => $e->getMessage()
+            ], 500);
         }
-
-        $medecin = Medecin::create($data);
-
-        $token = $medecin->createToken('auth_token')->plainTextToken;
-
-        return response()->json([
-            'access_token' => $token,
-            'token_type' => 'Bearer',
-            'medecin' => $medecin,
-            'photo_url' => $medecin->photo_profil ? asset('storage/' . $medecin->photo_profil) : null,
-        ], 201);
     }
 
     public function login(Request $request)
@@ -79,7 +112,12 @@ class MedecinAuthController extends Controller
 
     public function profile(Request $request)
     {
-        return response()->json($request->user());
+        $medecin = $request->user();
+
+        // Charger les relations si nécessaire
+        $medecin->load(['clinique', 'cliniques']);
+
+        return response()->json($medecin);
     }
 
     public function updateProfile(Request $request)
@@ -95,9 +133,43 @@ class MedecinAuthController extends Controller
             'address' => 'nullable|string|max:255',
             'bio' => 'nullable|string',
             'photo_profil' => 'nullable|image|mimes:jpg,jpeg,png|max:2048',
+            'type' => 'sometimes|string|in:independant,clinique', // Changé de practice_type à type
+            'clinique_id' => 'required_if:type,clinique|exists:cliniques,id',
+            'fonction' => 'nullable|string|max:255',
         ]);
 
-        $data = $request->only(['nom','prenom','email','telephone','specialite','address','bio']);
+        $data = $request->only([
+            'nom',
+            'prenom',
+            'email',
+            'telephone',
+            'specialite',
+            'address',
+            'bio'
+        ]);
+
+        // Gestion du type de pratique
+        if ($request->has('type')) {
+            $data['type'] = $request->type; // Utilise directement 'type'
+
+            if ($request->type === 'clinique' && $request->clinique_id) {
+                $data['clinique_id'] = $request->clinique_id;
+
+                // Ajouter à la relation many-to-many si ce n'est pas déjà fait
+                $clinique = Clinique::findOrFail($request->clinique_id);
+                if (!$medecin->cliniques->contains($clinique->id)) {
+                    $clinique->medecins()->attach($medecin->id, [
+                        'fonction' => $request->fonction ?? 'Médecin',
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            } else {
+                // Si le médecin devient indépendant, retirer les relations avec les cliniques
+                $data['clinique_id'] = null;
+                $medecin->cliniques()->detach();
+            }
+        }
 
         if ($request->hasFile('photo_profil')) {
             // Supprimer ancienne photo
