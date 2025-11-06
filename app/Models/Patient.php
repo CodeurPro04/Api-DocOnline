@@ -18,7 +18,12 @@ class Patient extends Authenticatable
         'telephone',
         'address',
         'password',
-        'photo_profil'
+        'photo_profil',
+        'groupe_sanguin',
+        'serologie_vih',
+        'antecedents_medicaux',
+        'allergies',
+        'traitements_chroniques'
     ];
 
     protected $hidden = [
@@ -48,7 +53,7 @@ class Patient extends Authenticatable
     public function favoriteMedecins()
     {
         return $this->belongsToMany(Medecin::class, 'favorites')
-                    ->withTimestamps();
+            ->withTimestamps();
     }
 
     // Getter pour le nom complet

@@ -30,6 +30,8 @@ class Medecin extends Authenticatable
         'clinique_id',
         'type',
         'fonction',
+        'commune',
+        'ville'
     ];
 
     protected $hidden = [

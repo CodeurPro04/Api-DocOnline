@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use OpenAI\Laravel\Facades\OpenAI;
+use Illuminate\Support\Facades\Http;
 use App\Models\Medecin;
 use Illuminate\Support\Facades\Log;
 
@@ -39,7 +39,15 @@ EOT;
         try {
             Log::info('MedicalChatController: Envoi de la requête à OpenAI', ['message' => $message]);
 
-            $response = OpenAI::chat()->create([
+            $apiKey = config('services.openai.api_key');
+
+            // SOLUTION : Utiliser Http Facade avec SSL désactivé
+            $response = Http::withOptions([
+                'verify' => false, // Désactive SSL
+            ])->withHeaders([
+                'Authorization' => 'Bearer ' . $apiKey,
+                'Content-Type' => 'application/json',
+            ])->timeout(30)->post('https://api.openai.com/v1/chat/completions', [
                 'model' => 'gpt-4o-mini',
                 'temperature' => 0.3,
                 'messages' => [
@@ -48,7 +56,13 @@ EOT;
                 ],
             ]);
 
-            $aiText = $response->choices[0]->message->content ?? '';
+            if ($response->failed()) {
+                throw new \Exception('Erreur API: ' . $response->status());
+            }
+
+            $responseData = $response->json();
+            $aiText = $responseData['choices'][0]['message']['content'] ?? '';
+
             Log::info('MedicalChatController: Texte IA', ['text' => $aiText]);
 
             $data = json_decode($aiText, true);

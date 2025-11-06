@@ -74,6 +74,15 @@ class AppointmentController extends Controller
             'consultation_type' => 'required|string|max:255',
         ]);
 
+        $medecin = Medecin::find($validated['medecin_id']);
+
+        //Vérifier si le médecin a des horaires définis
+        if (empty($medecin->working_hours)) {
+            return response()->json([
+                'message' => 'Impossible de prendre rendez-vous avec ce médecin. Ses horaires ne sont pas définis.'
+            ], 422);
+        }
+
         $date = Carbon::parse($validated['date']);
         $time = Carbon::parse($validated['time']);
 

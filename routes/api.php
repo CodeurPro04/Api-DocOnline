@@ -11,7 +11,7 @@ use App\Http\Controllers\MessageController;
 use App\Http\Controllers\Api\MedicalChatController;
 use App\Http\Controllers\CliniqueController;
 use App\Http\Controllers\ReviewController;
-use App\Http\Controllers\FavoriteController; // Ajoutez cette ligne
+use App\Http\Controllers\FavoriteController;
 
 // ======================
 // Routes Public
@@ -56,6 +56,8 @@ Route::prefix('patient')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/profile', [PatientAuthController::class, 'profile']);
         Route::put('/profile', [PatientAuthController::class, 'updateProfile']);
+        Route::put('/profile/password', [PatientAuthController::class, 'updatePassword']);
+        Route::delete('/profile', [PatientAuthController::class, 'deleteAccount']);
         Route::get('/appointments', [AppointmentController::class, 'index']);
     });
 });
@@ -71,6 +73,8 @@ Route::prefix('medecin')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/profile', [MedecinAuthController::class, 'profile']);
         Route::put('/profile', [MedecinAuthController::class, 'updateProfile']);
+        Route::put('/profile/password', [MedecinAuthController::class, 'updatePassword']);
+        Route::delete('/profile', [MedecinAuthController::class, 'deleteAccount']);
         Route::post('/profile/photo', [MedecinAuthController::class, 'updatePhoto']);
         Route::put('/working-hours', [MedecinAuthController::class, 'updateWorkingHours']);
         Route::get('/appointments', [AppointmentController::class, 'doctorAppointments']);
@@ -90,6 +94,8 @@ Route::prefix('clinique')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/profile', [CliniqueAuthController::class, 'profile']);
         Route::put('/profile', [CliniqueAuthController::class, 'updateProfile']);
+        Route::put('/profile/password', [CliniqueAuthController::class, 'updatePassword']);
+        Route::delete('/profile', [CliniqueAuthController::class, 'deleteAccount']);
 
         // Gestion des médecins
         Route::get('/medecins', [CliniqueAuthController::class, 'getMedecins']);
@@ -113,7 +119,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/messages/send', [MessageController::class, 'sendMessage']);
 });
 
-/// ======================
+// ======================
 // Routes Avis et Notes
 // ======================
 

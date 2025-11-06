@@ -28,62 +28,45 @@ class ReviewController extends Controller
      * Ajouter un avis (patient connecté uniquement)
      */
     public function store(Request $request, $medecinId)
-    {
-        // Vérifier que l'utilisateur est connecté
-        if (!Auth::guard('sanctum')->check()) {
-            return response()->json([
-                'error' => 'Vous devez être connecté pour laisser un avis'
-            ], 401);
-        }
-
-        $user = Auth::guard('sanctum')->user();
-
-        // Vérifier que l'utilisateur est un patient
-        if (!$user instanceof Patient) {
-            return response()->json([
-                'error' => 'Vous devez être connecté en tant que patient pour laisser un avis'
-            ], 403);
-        }
-
-        $request->validate([
-            'rating' => 'required|integer|min:1|max:5',
-            'comment' => 'nullable|string|max:1000'
-        ]);
-
-        // Vérifier si le patient a déjà noté ce médecin
-        $existingReview = Review::where('patient_id', $user->id)
-            ->where('medecin_id', $medecinId)
-            ->first();
-
-        if ($existingReview) {
-            return response()->json([
-                'error' => 'Vous avez déjà noté ce médecin'
-            ], 422);
-        }
-
-        // Vérifier que le médecin existe
-        $medecin = Medecin::find($medecinId);
-        if (!$medecin) {
-            return response()->json([
-                'error' => 'Médecin non trouvé'
-            ], 404);
-        }
-
-        $review = Review::create([
-            'patient_id' => $user->id,
-            'medecin_id' => $medecinId,
-            'rating' => $request->rating,
-            'comment' => $request->comment,
-            'is_verified' => true // ou false si vous voulez modérer les avis
-        ]);
-
-        $review->load('patient');
-
-        return response()->json([
-            'message' => 'Avis ajouté avec succès',
-            'review' => $review
-        ], 201);
+{
+    if (!Auth::guard('sanctum')->check()) {
+        return response()->json(['error' => 'Vous devez être connecté pour laisser un avis'], 401);
     }
+
+    $user = Auth::guard('sanctum')->user();
+
+    if (!$user instanceof Patient) {
+        return response()->json(['error' => 'Vous devez être connecté en tant que patient pour laisser un avis'], 403);
+    }
+
+    $request->validate([
+        'rating' => 'required|integer|min:1|max:5',
+        'comment' => 'nullable|string|max:1000'
+    ]);
+
+    $medecin = Medecin::find($medecinId);
+    if (!$medecin) {
+        return response()->json(['error' => 'Médecin non trouvé'], 404);
+    }
+
+    // Création directe, pas de vérification de doublon
+    $review = Review::create([
+        'patient_id' => $user->id,
+        'medecin_id' => $medecinId,
+        'rating' => $request->rating,
+        'comment' => $request->comment,
+        'is_verified' => true
+    ]);
+
+    $review->load('patient');
+
+    return response()->json([
+        'message' => 'Avis ajouté avec succès',
+        'review' => $review
+    ], 201);
+}
+
+
 
     /**
      * Mettre à jour un avis
