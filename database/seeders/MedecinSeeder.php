@@ -37,11 +37,14 @@ class MedecinSeeder extends Seeder
             ['Français', 'Allemand']
         ];
 
-        $horaires = [
-            'Lundi-Vendredi: 8h-18h',
-            'Lundi-Vendredi: 9h-17h, Samedi: 9h-13h',
-            'Lundi-Samedi: 8h-20h',
-            'Mardi-Samedi: 9h-19h'
+        $communes = [
+            'Macory', 'Treichville', 'Abobo', 'Cocody', 'Bingerville',
+            'Bassam', 'Port-Bouët', 'Yopougon', 'Koumassi', 'Adjamé'
+        ];
+
+        $villes = [
+            'Abidjan', 'Yamoussoukro', 'Bouaké', 'Daloa', 'San Pedro',
+            'Gagnoa', 'Man', 'Korhogo', 'Divo', 'Anyama'
         ];
 
         $cliniques = Clinique::all();
@@ -57,6 +60,8 @@ class MedecinSeeder extends Seeder
                 'telephone' => $faker->phoneNumber,
                 'specialite' => $faker->randomElement($specialites),
                 'address' => $faker->address,
+                'commune' => $faker->randomElement($communes),
+                'ville' => $faker->randomElement($villes),
                 'bio' => $faker->paragraph(4),
                 'password' => Hash::make('password'),
                 'photo_profil' => null,
@@ -65,7 +70,6 @@ class MedecinSeeder extends Seeder
                 'professional_background' => $faker->paragraph(2),
                 'consultation_price' => $faker->numberBetween(3000, 25000),
                 'insurance_accepted' => $faker->boolean(80),
-                'working_hours' => $faker->randomElement($horaires),
                 'clinique_id' => $clinique?->id,
                 'type' => $type,
                 'created_at' => $faker->dateTimeBetween('-1 year', 'now'),

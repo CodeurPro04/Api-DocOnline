@@ -22,6 +22,11 @@ class PatientSeeder extends Seeder
                 'address' => $faker->address,
                 'password' => Hash::make('password'),
                 'photo_profil' => null,
+                'antecedents_medicaux' => $faker->paragraph(4),
+                'groupe_sanguin' => $faker->randomElement(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']),
+                'serologie_vih' => $faker->randomElement(['Positif', 'Négatif', 'Inconnu']),
+                'allergies' => $faker->sentence(6),
+                'traitements_chroniques' => $faker->sentence(8),
                 //'date_naissance' => $faker->dateTimeBetween('-80 years', '-18 years'),
                 'created_at' => $faker->dateTimeBetween('-2 years', 'now'),
             ]);
