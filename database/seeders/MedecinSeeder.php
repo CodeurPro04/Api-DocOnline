@@ -38,7 +38,7 @@ class MedecinSeeder extends Seeder
         ];
 
         $communes = [
-            'Macory', 'Treichville', 'Abobo', 'Cocody', 'Bingerville',
+            'Marcory', 'Treichville', 'Abobo', 'Cocody', 'Bingerville',
             'Bassam', 'Port-Bouët', 'Yopougon', 'Koumassi', 'Adjamé'
         ];
 
