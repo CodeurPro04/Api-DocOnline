@@ -59,7 +59,7 @@ class MedecinAuthController extends Controller
             // Si rattaché à une clinique, créer la relation many-to-many
             if ($validated['type'] === 'clinique' && isset($validated['clinique_id'])) {
                 $clinique = Clinique::findOrFail($validated['clinique_id']);
-                
+
                 if (method_exists($clinique, 'medecins')) {
                     $clinique->medecins()->attach($medecin->id, [
                         'fonction' => $validated['fonction'] ?? 'Médecin',
@@ -79,7 +79,6 @@ class MedecinAuthController extends Controller
                 'medecin' => $medecin,
                 'photo_url' => $medecin->photo_profil ? asset('storage/' . $medecin->photo_profil) : null,
             ], 201);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'error' => 'Erreur de validation',
@@ -127,7 +126,6 @@ class MedecinAuthController extends Controller
                 'medecin' => $medecin,
                 'photo_url' => $medecin->photo_profil ? asset('storage/' . $medecin->photo_profil) : null,
             ], 200);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'error' => 'Erreur de validation',
@@ -160,7 +158,6 @@ class MedecinAuthController extends Controller
             }
 
             return response()->json($medecin, 200);
-
         } catch (\Exception $e) {
             Log::error('Erreur récupération profil médecin: ' . $e->getMessage());
             return response()->json([
@@ -241,7 +238,6 @@ class MedecinAuthController extends Controller
             }
 
             return response()->json($medecin, 200);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'error' => 'Erreur de validation',
@@ -265,18 +261,18 @@ class MedecinAuthController extends Controller
         try {
             $medecin = $request->user();
 
+            // Validation stricte + taille max 5 Mo
             $validated = $request->validate([
-                'photo_profil' => 'required|image|mimes:jpg,jpeg,png|max:2048',
+                'photo_profil' => 'required|image|mimes:jpg,jpeg,png,webp|max:5120', // 5120 = 5 Mo
             ]);
 
-            // Supprimer l'ancienne photo si elle existe
+            // Suppression de l'ancienne photo si elle existe
             if ($medecin->photo_profil && Storage::disk('public')->exists($medecin->photo_profil)) {
                 Storage::disk('public')->delete($medecin->photo_profil);
             }
 
-            // Sauvegarder la nouvelle photo
+            // Sauvegarde de la nouvelle photo
             $photoPath = $request->file('photo_profil')->store('photos/medecins', 'public');
-            
             $medecin->update(['photo_profil' => $photoPath]);
 
             return response()->json([
@@ -284,21 +280,26 @@ class MedecinAuthController extends Controller
                 'photo_profil' => $photoPath,
                 'photo_url' => asset('storage/' . $photoPath),
             ], 200);
-
         } catch (ValidationException $e) {
+            // Message utilisateur clair
+            $errors = $e->errors();
+            $firstError = collect($errors)->flatten()->first() ?? 'Erreur de validation du fichier.';
+
             return response()->json([
                 'error' => 'Erreur de validation',
-                'message' => $e->getMessage(),
-                'errors' => $e->errors()
+                'message' => $firstError,
             ], 422);
         } catch (\Exception $e) {
+            // Log interne + message générique côté front
             Log::error('Erreur mise à jour photo médecin: ' . $e->getMessage());
+
             return response()->json([
-                'error' => 'Erreur lors de la mise à jour de la photo',
-                'message' => $e->getMessage()
+                'error' => 'Erreur interne',
+                'message' => 'Une erreur est survenue lors de la mise à jour de la photo.',
             ], 500);
         }
     }
+
 
     /**
      * Mettre à jour les horaires de travail (route séparée si nécessaire)
@@ -324,7 +325,6 @@ class MedecinAuthController extends Controller
                 'message' => 'Horaires mis à jour avec succès',
                 'working_hours' => json_decode($workingHours),
             ], 200);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'error' => 'Erreur de validation',
@@ -351,7 +351,6 @@ class MedecinAuthController extends Controller
             return response()->json([
                 'message' => 'Déconnexion réussie'
             ], 200);
-
         } catch (\Exception $e) {
             Log::error('Erreur déconnexion médecin: ' . $e->getMessage());
             return response()->json([
@@ -404,7 +403,6 @@ class MedecinAuthController extends Controller
                 'access_token' => $token,
                 'token_type' => 'Bearer',
             ], 200);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'error' => 'Erreur de validation',
@@ -459,7 +457,6 @@ class MedecinAuthController extends Controller
             return response()->json([
                 'message' => 'Compte supprimé avec succès'
             ], 200);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'error' => 'Erreur de validation',
