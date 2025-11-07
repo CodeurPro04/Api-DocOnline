@@ -79,7 +79,7 @@ class AppointmentController extends Controller
         //Vérifier si le médecin a des horaires définis
         if (empty($medecin->working_hours)) {
             return response()->json([
-                'message' => 'Impossible de prendre rendez-vous avec ce médecin. Ses horaires ne sont pas définis.'
+                'message' => 'Ce médecin est actuellement indisponible pour des rendez-vous.'
             ], 422);
         }
 

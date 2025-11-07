@@ -90,12 +90,29 @@ class PatientAuthController extends Controller
             'telephone' => 'nullable|string|max:20',
             'address' => 'nullable|string|max:255',
             'photo_profil' => 'nullable|image|mimes:jpg,jpeg,png|max:2048',
+            'groupe_sanguin' => 'nullable|in:A+,A-,B+,B-,AB+,AB-,O+,O-,inconnu',
+            'serologie_vih' => 'nullable|in:positif,negatif,inconnu',
+            'antecedents_medicaux' => 'nullable|string',
+            'allergies' => 'nullable|string',
+            'traitements_chroniques' => 'nullable|string',
         ]);
 
-        $data = $request->only(['nom','prenom','email','telephone','address']);
+        // On prend tous les champs modifiables
+        $data = $request->only([
+            'nom',
+            'prenom',
+            'email',
+            'telephone',
+            'address',
+            'groupe_sanguin',
+            'serologie_vih',
+            'antecedents_medicaux',
+            'allergies',
+            'traitements_chroniques',
+        ]);
 
+        // Gestion de la photo de profil
         if ($request->hasFile('photo_profil')) {
-            // Supprimer l'ancienne photo si elle existe
             if ($patient->photo_profil && Storage::disk('public')->exists($patient->photo_profil)) {
                 Storage::disk('public')->delete($patient->photo_profil);
             }
@@ -157,7 +174,6 @@ class PatientAuthController extends Controller
                 'access_token' => $token,
                 'token_type' => 'Bearer',
             ], 200);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'error' => 'Erreur de validation',
@@ -212,7 +228,6 @@ class PatientAuthController extends Controller
             return response()->json([
                 'message' => 'Compte supprimé avec succès'
             ], 200);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'error' => 'Erreur de validation',
@@ -239,7 +254,6 @@ class PatientAuthController extends Controller
             return response()->json([
                 'message' => 'Déconnexion réussie'
             ], 200);
-
         } catch (\Exception $e) {
             Log::error('Erreur déconnexion patient: ' . $e->getMessage());
             return response()->json([

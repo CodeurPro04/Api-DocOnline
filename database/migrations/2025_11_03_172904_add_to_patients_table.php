@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('patients', function (Blueprint $table) {
-            $table->enum('groupe_sanguin', ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'])->nullable();
+            $table->enum('groupe_sanguin', ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'inconnu'])->nullable();
             $table->enum('serologie_vih', ['positif', 'negatif', 'inconnu'])->nullable();
             $table->text('antecedents_medicaux')->nullable();
             $table->text('allergies')->nullable();
