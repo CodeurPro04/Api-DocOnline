@@ -59,6 +59,9 @@ Route::prefix('patient')->group(function () {
         Route::put('/profile/password', [PatientAuthController::class, 'updatePassword']);
         Route::delete('/profile', [PatientAuthController::class, 'deleteAccount']);
         Route::get('/appointments', [AppointmentController::class, 'index']);
+        
+        // Ajouter cette route pour l'upload de photo
+        Route::post('/profile/photo', [PatientAuthController::class, 'updatePhoto']);
     });
 });
 
@@ -96,6 +99,7 @@ Route::prefix('clinique')->group(function () {
         Route::put('/profile', [CliniqueAuthController::class, 'updateProfile']);
         Route::put('/profile/password', [CliniqueAuthController::class, 'updatePassword']);
         Route::delete('/profile', [CliniqueAuthController::class, 'deleteAccount']);
+        Route::post('/profile/photo', [CliniqueAuthController::class, 'updatePhoto']);
 
         // Gestion des médecins
         Route::get('/medecins', [CliniqueAuthController::class, 'getMedecins']);
@@ -132,4 +136,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/medecins/{id}/reviews', [ReviewController::class, 'store']);
     Route::put('/reviews/{id}', [ReviewController::class, 'update']);
     Route::delete('/reviews/{id}', [ReviewController::class, 'destroy']);
+});
+
+// ======================
+// Routes Google OAuth
+// ======================
+Route::prefix('auth/google')->group(function () {
+    Route::post('/patient', [PatientAuthController::class, 'googleAuth']);
+    Route::post('/medecin', [MedecinAuthController::class, 'googleAuth']);
+    Route::post('/clinique', [CliniqueAuthController::class, 'googleAuth']);
 });

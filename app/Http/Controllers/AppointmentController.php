@@ -276,16 +276,30 @@ class AppointmentController extends Controller
 
     private function formatAppointmentForDoctor(Appointment $a)
     {
+        $patient = $a->patient;
+        
         return [
             'id' => $a->id,
-            'patient' => "{$a->patient->prenom} {$a->patient->nom}",
-            'patient_id' => $a->patient->id, // Ajouter l'ID du patient
-            'telephone' => $a->patient->telephone, // Ajouter le téléphone
-            'address' => $a->patient->address, // Ajouter l'adresse
+            'patient' => "{$patient->prenom} {$patient->nom}",
+            'patient_id' => $patient->id,
+            'patient_nom' => $patient->nom,
+            'patient_prenom' => $patient->prenom,
+            'patient_email' => $patient->email,
+            'patient_telephone' => $patient->telephone,
+            'patient_address' => $patient->address,
+            'patient_groupe_sanguin' => $patient->groupe_sanguin,
+            'patient_serologie_vih' => $patient->serologie_vih,
+            'patient_antecedents_medicaux' => $patient->antecedents_medicaux,
+            'patient_allergies' => $patient->allergies,
+            'patient_traitements_chroniques' => $patient->traitements_chroniques,
+            'patient_photo_profil' => $patient->photo_profil,
+            'patient_photo_url' => $patient->photo_url,
             'date' => $a->date,
             'time' => $a->time,
             'status' => $a->status,
             'consultation_type' => $a->consultation_type,
+            'created_at' => $a->created_at,
+            'updated_at' => $a->updated_at,
         ];
     }
 

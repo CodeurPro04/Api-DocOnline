@@ -5,10 +5,14 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Patient;
+use App\Models\Medecin;
+use App\Models\Clinique;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class PatientAuthController extends Controller
 {
@@ -258,6 +262,204 @@ class PatientAuthController extends Controller
             Log::error('Erreur déconnexion patient: ' . $e->getMessage());
             return response()->json([
                 'error' => 'Erreur lors de la déconnexion',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Mettre à jour la photo de profil du patient
+     */
+    public function updatePhoto(Request $request)
+    {
+        try {
+            $patient = $request->user();
+
+            $validated = $request->validate([
+                'photo_profil' => 'required|image|mimes:jpg,jpeg,png,webp|max:5120',
+            ]);
+
+            // Supprimer l'ancienne photo
+            if ($patient->photo_profil && file_exists(public_path('assets/images/' . $patient->photo_profil))) {
+                unlink(public_path('assets/images/' . $patient->photo_profil));
+            }
+
+            // Sauvegarder dans public/assets/images/
+            $file = $request->file('photo_profil');
+            $fileName = 'photos/patients/' . time() . '_' . $file->getClientOriginalName();
+            $file->move(public_path('assets/images/photos/patients'), $fileName);
+
+            $patient->update(['photo_profil' => $fileName]);
+
+            return response()->json([
+                'message' => 'Photo de profil mise à jour avec succès',
+                'photo_profil' => $fileName,
+                'photo_url' => asset('assets/images/' . $fileName), // URL CORRECTE
+            ], 200);
+        } catch (ValidationException $e) {
+            Log::error('Erreur mise à jour photo patient: ' . $e->getMessage());
+
+            return response()->json([
+                'error' => 'Erreur interne',
+                'message' => 'Une erreur est survenue lors de la mise à jour de la photo.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Authentification Google avec Google_Client et certificats locaux
+     */
+    public function googleAuth(Request $request)
+    {
+        \Log::info('Google Auth Patient - Début avec Google_Client');
+
+        try {
+            $request->validate([
+                'token' => 'required|string',
+                'userType' => 'required|string|in:patient,medecin,clinique'
+            ]);
+
+            $token = $request->token;
+
+            // Initialiser Google_Client
+            $client = new \Google_Client([
+                'client_id' => env('GOOGLE_CLIENT_ID'),
+                'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+            ]);
+
+            // Utiliser le certificat local que vous avez téléchargé
+            $certPath = storage_path('certs/cacert.pem');
+
+            if (!file_exists($certPath)) {
+                \Log::error('Certificat CA introuvable: ' . $certPath);
+                return response()->json(['error' => 'Configuration SSL manquante'], 500);
+            }
+
+            $client->setHttpClient(new \GuzzleHttp\Client([
+                'verify' => $certPath,
+                'timeout' => 30,
+                'connect_timeout' => 10,
+            ]));
+
+            // Vérifier le token avec Google
+            $payload = $client->verifyIdToken($token);
+
+            if (!$payload) {
+                \Log::error('Google Auth - Token invalide');
+                return response()->json(['error' => 'Token Google invalide'], 401);
+            }
+
+            \Log::info('Google Auth Patient - Payload vérifié', [
+                'email' => $payload['email'],
+                'google_id' => $payload['sub']
+            ]);
+
+            // Utiliser les données du payload
+            $googleId = $payload['sub'];
+            $email = $payload['email'];
+            $name = $payload['name'] ?? 'Utilisateur Google';
+            $givenName = $payload['given_name'] ?? '';
+            $familyName = $payload['family_name'] ?? '';
+            $emailVerified = $payload['email_verified'] ?? false;
+
+            // Vérifier si l'email est vérifié chez Google
+            if (!$emailVerified) {
+                \Log::warning('Google Auth - Email non vérifié', ['email' => $email]);
+                return response()->json(['error' => 'Email Google non vérifié'], 401);
+            }
+
+            // Séparer le nom et prénom
+            $prenom = $givenName ?: explode(' ', $name)[0] ?? $name;
+            $nom = $familyName ?: (explode(' ', $name)[1] ?? $name);
+
+            // Chercher par google_id
+            $patient = Patient::where('google_id', $googleId)->first();
+
+            // Si pas trouvé, chercher par email
+            if (!$patient) {
+                $patient = Patient::where('email', $email)->first();
+            }
+
+            if (!$patient) {
+                \Log::info('Google Auth Patient - Création nouveau patient', [
+                    'email' => $email,
+                    'google_id' => $googleId
+                ]);
+
+                $patient = Patient::create([
+                    'nom' => $nom,
+                    'prenom' => $prenom,
+                    'email' => $email,
+                    'password' => Hash::make(\Illuminate\Support\Str::random(24)),
+                    'google_id' => $googleId,
+                    'telephone' => null,
+                    'address' => null,
+                    'email_verified_at' => now(), // Email vérifié par Google
+                ]);
+            } else {
+                // Mettre à jour le google_id si l'utilisateur existe déjà
+                if (!$patient->google_id) {
+                    $patient->update([
+                        'google_id' => $googleId,
+                        'email_verified_at' => now() // Marquer comme vérifié si ce n'était pas le cas
+                    ]);
+                    \Log::info('Google Auth - Patient mis à jour avec Google ID', ['patient_id' => $patient->id]);
+                }
+            }
+
+            // Créer le token d'accès
+            $token = $patient->createToken('google-auth')->plainTextToken;
+
+            \Log::info('Google Auth Patient - Succès', [
+                'patient_id' => $patient->id,
+                'email' => $patient->email
+            ]);
+
+            return response()->json([
+                'patient' => $patient,
+                'access_token' => $token,
+                'token_type' => 'Bearer',
+            ], 200);
+        } catch (\Firebase\JWT\BeforeValidException $e) {
+            \Log::error('Google Auth - Token pas encore valide: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Token pas encore valide',
+                'message' => 'Le token Google n\'est pas encore actif. Vérifiez l\'heure de votre appareil.'
+            ], 401);
+        } catch (\Firebase\JWT\ExpiredException $e) {
+            \Log::error('Google Auth - Token expiré: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Token expiré',
+                'message' => 'Le token Google a expiré'
+            ], 401);
+        } catch (\Google_Service_Exception $e) {
+            \Log::error('Google Auth - Erreur Google API: ' . $e->getMessage(), [
+                'code' => $e->getCode(),
+                'details' => $e->getErrors() ?? []
+            ]);
+            return response()->json([
+                'error' => 'Erreur de vérification Google',
+                'message' => $e->getMessage()
+            ], 500);
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            \Log::error('Google Auth - Erreur réseau: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Erreur de connexion réseau',
+                'message' => 'Impossible de vérifier le token avec Google'
+            ], 503);
+        } catch (\Exception $e) {
+            \Log::error('Google Auth Patient - Erreur: ' . $e->getMessage());
+
+            // Gestion spécifique de l'erreur "nbf" (not before)
+            if (strpos($e->getMessage(), 'nbf') !== false || strpos($e->getMessage(), 'not before') !== false) {
+                return response()->json([
+                    'error' => 'Token pas encore valide',
+                    'message' => 'Le token Google n\'est pas encore actif. Cela peut être dû à un décalage horaire.'
+                ], 401);
+            }
+
+            return response()->json([
+                'error' => 'Erreur d\'authentification Google',
                 'message' => $e->getMessage()
             ], 500);
         }

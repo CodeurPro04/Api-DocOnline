@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Clinique;
+use App\Models\Patient;
 use App\Models\Medecin;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Storage;
@@ -111,9 +113,18 @@ class CliniqueAuthController extends Controller
         ]);
 
         $data = $request->only([
-            'nom', 'email', 'telephone', 'address', 'description',
-            'services', 'equipements', 'horaires', 'type_etablissement',
-            'urgences_24h', 'parking_disponible', 'site_web'
+            'nom',
+            'email',
+            'telephone',
+            'address',
+            'description',
+            'services',
+            'equipements',
+            'horaires',
+            'type_etablissement',
+            'urgences_24h',
+            'parking_disponible',
+            'site_web'
         ]);
 
         if ($request->hasFile('photo_profil')) {
@@ -177,7 +188,6 @@ class CliniqueAuthController extends Controller
                 'access_token' => $token,
                 'token_type' => 'Bearer',
             ], 200);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'error' => 'Erreur de validation',
@@ -235,7 +245,6 @@ class CliniqueAuthController extends Controller
             return response()->json([
                 'message' => 'Compte supprimé avec succès'
             ], 200);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'error' => 'Erreur de validation',
@@ -262,7 +271,6 @@ class CliniqueAuthController extends Controller
             return response()->json([
                 'message' => 'Déconnexion réussie'
             ], 200);
-
         } catch (\Exception $e) {
             Log::error('Erreur déconnexion clinique: ' . $e->getMessage());
             return response()->json([
@@ -322,5 +330,213 @@ class CliniqueAuthController extends Controller
         $medecins = $clinique->medecins()->with('user')->get();
 
         return response()->json($medecins);
+    }
+
+        /**
+     * Mettre à jour la photo de profil de la clinique
+     */
+    public function updatePhoto(Request $request)
+    {
+        try {
+            $clinique = $request->user();
+
+            $validated = $request->validate([
+                'photo_profil' => 'required|image|mimes:jpg,jpeg,png,webp|max:5120',
+            ]);
+
+            // Supprimer l'ancienne photo si elle existe
+            if ($clinique->photo_profil && Storage::disk('public')->exists($clinique->photo_profil)) {
+                Storage::disk('public')->delete($clinique->photo_profil);
+            }
+
+            // Sauvegarder la nouvelle photo
+            $data['photo_profil'] = $request->file('photo_profil')->store('photos/cliniques', 'public');
+
+            $clinique->update($data);
+
+            return response()->json([
+                'message' => 'Photo de profil mise à jour avec succès',
+                'photo_profil' => $clinique->photo_profil,
+                'photo_url' => asset('storage/' . $clinique->photo_profil),
+            ], 200);
+        } catch (ValidationException $e) {
+            Log::error('Erreur mise à jour photo clinique: ' . $e->getMessage());
+
+            return response()->json([
+                'error' => 'Erreur de validation',
+                'message' => $e->getMessage(),
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Erreur mise à jour photo clinique: ' . $e->getMessage());
+
+            return response()->json([
+                'error' => 'Erreur interne',
+                'message' => 'Une erreur est survenue lors de la mise à jour de la photo.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Authentification Google pour les cliniques avec Google_Client et certificats locaux
+     */
+    public function googleAuth(Request $request)
+    {
+        \Log::info('Google Auth Clinique - Début avec Google_Client');
+
+        try {
+            $request->validate([
+                'token' => 'required|string',
+                'userType' => 'required|string|in:patient,medecin,clinique'
+            ]);
+
+            $token = $request->token;
+
+            // Initialiser Google_Client
+            $client = new \Google_Client([
+                'client_id' => env('GOOGLE_CLIENT_ID'),
+                'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+            ]);
+
+            // Utiliser le certificat local
+            $certPath = storage_path('certs/cacert.pem');
+
+            if (!file_exists($certPath)) {
+                \Log::error('Certificat CA introuvable: ' . $certPath);
+                return response()->json(['error' => 'Configuration SSL manquante'], 500);
+            }
+
+            $client->setHttpClient(new \GuzzleHttp\Client([
+                'verify' => $certPath,
+                'timeout' => 30,
+                'connect_timeout' => 10,
+            ]));
+
+            // Vérifier le token avec Google
+            $payload = $client->verifyIdToken($token);
+
+            if (!$payload) {
+                \Log::error('Google Auth Clinique - Token invalide');
+                return response()->json(['error' => 'Token Google invalide'], 401);
+            }
+
+            \Log::info('Google Auth Clinique - Payload vérifié', [
+                'email' => $payload['email'],
+                'google_id' => $payload['sub']
+            ]);
+
+            // Utiliser les données du payload
+            $googleId = $payload['sub'];
+            $email = $payload['email'];
+            $name = $payload['name'] ?? 'Clinique Google';
+            $picture = $payload['picture'] ?? null;
+            $emailVerified = $payload['email_verified'] ?? false;
+
+            // Vérifier si l'email est vérifié chez Google
+            if (!$emailVerified) {
+                \Log::warning('Google Auth Clinique - Email non vérifié', ['email' => $email]);
+                return response()->json(['error' => 'Email Google non vérifié'], 401);
+            }
+
+            // Chercher par google_id
+            $clinique = Clinique::where('google_id', $googleId)->first();
+
+            // Si pas trouvé, chercher par email
+            if (!$clinique) {
+                $clinique = Clinique::where('email', $email)->first();
+            }
+
+            if (!$clinique) {
+                \Log::info('Google Auth Clinique - Création nouvelle clinique', [
+                    'email' => $email,
+                    'google_id' => $googleId
+                ]);
+
+                // Créer une nouvelle clinique avec des valeurs par défaut
+                $clinique = Clinique::create([
+                    'nom' => $name,
+                    'email' => $email,
+                    'password' => Hash::make(Str::random(24)),
+                    'address' => 'Adresse à compléter',
+                    'type_etablissement' => 'Clinique privée',
+                    'google_id' => $googleId,
+                    'photo_profil' => $picture,
+                    'description' => 'Description à compléter',
+                    'telephone' => null,
+                    'site_web' => null,
+                    'urgences_24h' => false,
+                    'parking_disponible' => false,
+                    'email_verified_at' => now(),
+                ]);
+            } else {
+                \Log::info('Google Auth Clinique - Clinique existante trouvée', ['id' => $clinique->id]);
+
+                // Mettre à jour le google_id si la clinique existe déjà
+                if (!$clinique->google_id) {
+                    $clinique->update([
+                        'google_id' => $googleId,
+                        'photo_profil' => $picture ?: $clinique->photo_profil,
+                        'email_verified_at' => now()
+                    ]);
+                }
+            }
+
+            // Créer le token
+            $token = $clinique->createToken('google-auth')->plainTextToken;
+
+            \Log::info('Google Auth Clinique - Succès', [
+                'clinique_id' => $clinique->id,
+                'email' => $clinique->email
+            ]);
+
+            return response()->json([
+                'clinique' => $clinique,
+                'access_token' => $token,
+                'token_type' => 'Bearer',
+                'photo_url' => $clinique->photo_profil ?: $picture,
+            ], 200);
+        } catch (\Firebase\JWT\BeforeValidException $e) {
+            \Log::error('Google Auth Clinique - Token pas encore valide: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Token pas encore valide',
+                'message' => 'Le token Google n\'est pas encore actif. Vérifiez l\'heure de votre appareil.'
+            ], 401);
+        } catch (\Firebase\JWT\ExpiredException $e) {
+            \Log::error('Google Auth Clinique - Token expiré: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Token expiré',
+                'message' => 'Le token Google a expiré'
+            ], 401);
+        } catch (\Google_Service_Exception $e) {
+            \Log::error('Google Auth Clinique - Erreur Google API: ' . $e->getMessage(), [
+                'code' => $e->getCode(),
+                'details' => $e->getErrors() ?? []
+            ]);
+            return response()->json([
+                'error' => 'Erreur de vérification Google',
+                'message' => $e->getMessage()
+            ], 500);
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            \Log::error('Google Auth Clinique - Erreur réseau: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Erreur de connexion réseau',
+                'message' => 'Impossible de vérifier le token avec Google'
+            ], 503);
+        } catch (\Exception $e) {
+            \Log::error('Google Auth Clinique - Erreur: ' . $e->getMessage());
+
+            // Gestion spécifique de l'erreur "nbf" (not before)
+            if (strpos($e->getMessage(), 'nbf') !== false || strpos($e->getMessage(), 'not before') !== false) {
+                return response()->json([
+                    'error' => 'Token pas encore valide',
+                    'message' => 'Le token Google n\'est pas encore actif. Cela peut être dû à un décalage horaire.'
+                ], 401);
+            }
+
+            return response()->json([
+                'error' => 'Erreur d\'authentification Google',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 }

@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Medecin;
+use App\Models\Patient;
 use App\Models\Clinique;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
@@ -467,6 +469,174 @@ class MedecinAuthController extends Controller
             Log::error('Erreur suppression compte médecin: ' . $e->getMessage());
             return response()->json([
                 'error' => 'Erreur lors de la suppression du compte',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Authentification Google pour les médecins avec Google_Client et certificats locaux
+     */
+    public function googleAuth(Request $request)
+    {
+        \Log::info('Google Auth Médecin - Début avec Google_Client');
+
+        try {
+            $request->validate([
+                'token' => 'required|string',
+                'userType' => 'required|string|in:patient,medecin,clinique'
+            ]);
+
+            $token = $request->token;
+
+            // Initialiser Google_Client
+            $client = new \Google_Client([
+                'client_id' => env('GOOGLE_CLIENT_ID'),
+                'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+            ]);
+
+            // Utiliser le certificat local
+            $certPath = storage_path('certs/cacert.pem');
+
+            if (!file_exists($certPath)) {
+                \Log::error('Certificat CA introuvable: ' . $certPath);
+                return response()->json(['error' => 'Configuration SSL manquante'], 500);
+            }
+
+            $client->setHttpClient(new \GuzzleHttp\Client([
+                'verify' => $certPath,
+                'timeout' => 30,
+                'connect_timeout' => 10,
+            ]));
+
+            // Vérifier le token avec Google
+            $payload = $client->verifyIdToken($token);
+
+            if (!$payload) {
+                \Log::error('Google Auth Médecin - Token invalide');
+                return response()->json(['error' => 'Token Google invalide'], 401);
+            }
+
+            \Log::info('Google Auth Médecin - Payload vérifié', [
+                'email' => $payload['email'],
+                'google_id' => $payload['sub']
+            ]);
+
+            // Utiliser les données du payload
+            $googleId = $payload['sub'];
+            $email = $payload['email'];
+            $name = $payload['name'] ?? 'Docteur Google';
+            $givenName = $payload['given_name'] ?? '';
+            $familyName = $payload['family_name'] ?? '';
+            $picture = $payload['picture'] ?? null;
+            $emailVerified = $payload['email_verified'] ?? false;
+
+            // Vérifier si l'email est vérifié chez Google
+            if (!$emailVerified) {
+                \Log::warning('Google Auth Médecin - Email non vérifié', ['email' => $email]);
+                return response()->json(['error' => 'Email Google non vérifié'], 401);
+            }
+
+            // Séparer le nom et prénom
+            $prenom = $givenName ?: explode(' ', $name)[0] ?? $name;
+            $nom = $familyName ?: (explode(' ', $name)[1] ?? $name);
+
+            // Chercher par google_id
+            $medecin = Medecin::where('google_id', $googleId)->first();
+
+            // Si pas trouvé, chercher par email
+            if (!$medecin) {
+                $medecin = Medecin::where('email', $email)->first();
+            }
+
+            if (!$medecin) {
+                \Log::info('Google Auth Médecin - Création nouveau médecin', [
+                    'email' => $email,
+                    'google_id' => $googleId
+                ]);
+
+                // Créer un nouveau médecin avec des valeurs par défaut
+                $medecin = Medecin::create([
+                    'nom' => $nom,
+                    'prenom' => $prenom,
+                    'email' => $email,
+                    'password' => Hash::make(Str::random(24)),
+                    'specialite' => 'Médecine Générale',
+                    'type' => 'independant',
+                    'google_id' => $googleId,
+                    'photo_profil' => $picture,
+                    'address' => 'Adresse à compléter',
+                    'telephone' => null,
+                    'bio' => null,
+                    'email_verified_at' => now(),
+                ]);
+            } else {
+                \Log::info('Google Auth Médecin - Médecin existant trouvé', ['id' => $medecin->id]);
+
+                // Mettre à jour le google_id si le médecin existe déjà
+                if (!$medecin->google_id) {
+                    $medecin->update([
+                        'google_id' => $googleId,
+                        'photo_profil' => $picture ?: $medecin->photo_profil,
+                        'email_verified_at' => now()
+                    ]);
+                }
+            }
+
+            // Créer le token
+            $token = $medecin->createToken('google-auth')->plainTextToken;
+
+            \Log::info('Google Auth Médecin - Succès', [
+                'medecin_id' => $medecin->id,
+                'email' => $medecin->email
+            ]);
+
+            return response()->json([
+                'medecin' => $medecin,
+                'access_token' => $token,
+                'token_type' => 'Bearer',
+                'photo_url' => $medecin->photo_profil ?: $picture,
+            ], 200);
+        } catch (\Firebase\JWT\BeforeValidException $e) {
+            \Log::error('Google Auth Médecin - Token pas encore valide: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Token pas encore valide',
+                'message' => 'Le token Google n\'est pas encore actif. Vérifiez l\'heure de votre appareil.'
+            ], 401);
+        } catch (\Firebase\JWT\ExpiredException $e) {
+            \Log::error('Google Auth Médecin - Token expiré: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Token expiré',
+                'message' => 'Le token Google a expiré'
+            ], 401);
+        } catch (\Google_Service_Exception $e) {
+            \Log::error('Google Auth Médecin - Erreur Google API: ' . $e->getMessage(), [
+                'code' => $e->getCode(),
+                'details' => $e->getErrors() ?? []
+            ]);
+            return response()->json([
+                'error' => 'Erreur de vérification Google',
+                'message' => $e->getMessage()
+            ], 500);
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            \Log::error('Google Auth Médecin - Erreur réseau: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Erreur de connexion réseau',
+                'message' => 'Impossible de vérifier le token avec Google'
+            ], 503);
+        } catch (\Exception $e) {
+            \Log::error('Google Auth Médecin - Erreur: ' . $e->getMessage());
+
+            // Gestion spécifique de l'erreur "nbf" (not before)
+            if (strpos($e->getMessage(), 'nbf') !== false || strpos($e->getMessage(), 'not before') !== false) {
+                return response()->json([
+                    'error' => 'Token pas encore valide',
+                    'message' => 'Le token Google n\'est pas encore actif. Cela peut être dû à un décalage horaire.'
+                ], 401);
+            }
+
+            return response()->json([
+                'error' => 'Erreur d\'authentification Google',
                 'message' => $e->getMessage()
             ], 500);
         }
