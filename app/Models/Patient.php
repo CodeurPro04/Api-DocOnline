@@ -43,6 +43,11 @@ class Patient extends Authenticatable
         return $this->hasMany(Review::class);
     }
 
+    public function getNameAttribute()
+    {
+        return $this->nom . ' ' . $this->prenom;
+    }
+
     // Relation avec les favoris
     public function favorites()
     {

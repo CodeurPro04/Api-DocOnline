@@ -59,6 +59,8 @@ Route::prefix('patient')->group(function () {
         Route::put('/profile/password', [PatientAuthController::class, 'updatePassword']);
         Route::delete('/profile', [PatientAuthController::class, 'deleteAccount']);
         Route::get('/appointments', [AppointmentController::class, 'index']);
+        Route::post('/appointments', [AppointmentController::class, 'store']);
+        Route::delete('/appointments/{id}', [AppointmentController::class, 'cancel']);
         
         // Ajouter cette route pour l'upload de photo
         Route::post('/profile/photo', [PatientAuthController::class, 'updatePhoto']);
@@ -81,6 +83,7 @@ Route::prefix('medecin')->group(function () {
         Route::post('/profile/photo', [MedecinAuthController::class, 'updatePhoto']);
         Route::put('/working-hours', [MedecinAuthController::class, 'updateWorkingHours']);
         Route::get('/appointments', [AppointmentController::class, 'doctorAppointments']);
+        Route::get('/appointments', [AppointmentController::class, 'indexForDoctor']);
         Route::patch('/appointments/{id}/confirm', [AppointmentController::class, 'confirm']);
         Route::patch('/appointments/{id}/reject', [AppointmentController::class, 'reject']);
     });

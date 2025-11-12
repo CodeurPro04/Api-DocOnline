@@ -61,6 +61,11 @@ class Medecin extends Authenticatable
             ->withTimestamps();
     }
 
+    public function getNameAttribute()
+    {
+        return $this->nom . ' ' . $this->prenom;
+    }
+
     // Relation avec les rendez-vous
     public function appointments()
     {

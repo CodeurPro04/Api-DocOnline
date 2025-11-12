@@ -5,7 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\Appointment;
 use App\Models\Medecin;
 use App\Models\Patient;
+use App\Mail\AppointmentCreated;
+use App\Mail\AppointmentConfirmed;
+use App\Mail\AppointmentRejected;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -60,7 +64,7 @@ class AppointmentController extends Controller
         }
     }
     /**
-     * Création d’un rendez-vous par un patient
+     * Création d'un rendez-vous par un patient
      */
     public function store(Request $request)
     {
@@ -110,37 +114,45 @@ class AppointmentController extends Controller
                 'created_by' => 'patient',
             ]);
 
+            // Chargez les relations avant d'envoyer les emails
+            $appointment->load(['patient', 'medecin']);
+
+            // Envoyer les emails après la création du rendez-vous avec gestion d'erreur
+            $emailSent = false;
+            try {
+                \Log::info('Tentative d\'envoi d\'email pour le rendez-vous: ' . $appointment->id);
+
+                // OPTION 1: Si votre classe Mailable attend l'ID
+                Mail::to($patient->email)->send(new AppointmentCreated($appointment, 'patient'));
+                \Log::info('Email envoyé au patient: ' . $patient->email);
+
+                Mail::to($medecin->email)->send(new AppointmentCreated($appointment, 'medecin'));
+                \Log::info('Email envoyé au médecin: ' . $medecin->email);
+
+                // OPTION 2: Si votre classe Mailable attend l'objet complet
+                // Mail::to($patient->email)->send(new AppointmentCreated($appointment, 'patient'));
+                // Mail::to($medecin->email)->send(new AppointmentCreated($appointment, 'medecin'));
+
+                $emailSent = true;
+            } catch (\Exception $emailException) {
+                \Log::error('Erreur envoi email création rendez-vous: ' . $emailException->getMessage());
+                \Log::error('Stack trace: ' . $emailException->getTraceAsString());
+                // On continue même si l'email échoue
+            }
+
             DB::commit();
+
             return response()->json([
-                'message' => 'Rendez-vous créé avec succès.',
-                'appointment' => $this->formatAppointmentForPatient($appointment->load('medecin')),
+                'message' => 'Rendez-vous créé avec succès.' . ($emailSent ? '' : ' (Problème d\'envoi d\'email)'),
+                'appointment' => $this->formatAppointmentForPatient($appointment),
+                'email_sent' => $emailSent
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
             \Log::error('Erreur création rendez-vous: ' . $e->getMessage());
+            \Log::error('Stack trace: ' . $e->getTraceAsString());
             return response()->json(['error' => 'Erreur interne lors de la création du rendez-vous.'], 500);
         }
-    }
-
-    /**
-     * Rendez-vous du médecin connecté
-     */
-    public function doctorAppointments()
-    {
-        $medecin = Auth::guard('medecin')->user();
-
-        if (!$medecin) {
-            return response()->json(['error' => 'Médecin non authentifié'], 401);
-        }
-
-        $appointments = Appointment::with('patient')
-            ->where('medecin_id', $medecin->id)
-            ->latest('date')
-            ->latest('time')
-            ->get()
-            ->map(fn($a) => $this->formatAppointmentForDoctor($a));
-
-        return response()->json($appointments);
     }
 
     /**
@@ -149,18 +161,56 @@ class AppointmentController extends Controller
     public function confirm($id)
     {
         $medecin = Auth::guard('medecin')->user();
-        if (!$medecin) return response()->json(['error' => 'Médecin non authentifié'], 401);
+        if (!$medecin) {
+            return response()->json(['error' => 'Médecin non authentifié'], 401);
+        }
 
         $appointment = Appointment::where('id', $id)
             ->where('medecin_id', $medecin->id)
+            ->with(['patient', 'medecin']) // ✅ Charger aussi medecin
             ->first();
 
-        if (!$appointment) return response()->json(['error' => 'Rendez-vous non trouvé'], 404);
-        if ($appointment->status !== 'en_attente') return response()->json(['error' => 'Rendez-vous déjà traité'], 422);
+        if (!$appointment) {
+            return response()->json(['error' => 'Rendez-vous non trouvé'], 404);
+        }
 
-        $appointment->update(['status' => 'confirmé', 'confirmed_at' => now()]);
+        // ✅ CORRECTION ICI - Utiliser 'en_attente' au lieu de 'en attente'
+        if ($appointment->status !== 'en_attente') {
+            return response()->json(['error' => 'Rendez-vous déjà traité'], 422);
+        }
 
-        return response()->json(['message' => 'Rendez-vous confirmé', 'appointment' => $appointment]);
+        DB::beginTransaction();
+        try {
+            $appointment->update(['status' => 'confirmé']);
+
+            // Envoyer l'email de confirmation au patient
+            $emailSent = false;
+            try {
+                \Log::info('Tentative envoi email confirmation RDV: ' . $appointment->id . ' à ' . $appointment->patient->email);
+
+                // ✅ Passer l'objet complet avec les relations chargées
+                Mail::to($appointment->patient->email)->send(new AppointmentConfirmed($appointment));
+
+                $emailSent = true;
+                \Log::info('Email de confirmation envoyé avec succès');
+            } catch (\Exception $emailException) {
+                \Log::error('Erreur envoi email confirmation: ' . $emailException->getMessage());
+                \Log::error('Stack trace: ' . $emailException->getTraceAsString());
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Rendez-vous confirmé' . ($emailSent ? '' : ' (Email non envoyé)'),
+                'appointment' => $this->formatAppointmentForDoctor($appointment),
+                'email_sent' => $emailSent
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::error('Erreur confirmation rendez-vous: ' . $e->getMessage());
+            \Log::error('Stack trace: ' . $e->getTraceAsString());
+            return response()->json(['error' => 'Erreur interne lors de la confirmation du rendez-vous.'], 500);
+        }
     }
 
     /**
@@ -169,23 +219,109 @@ class AppointmentController extends Controller
     public function reject(Request $request, $id)
     {
         $medecin = Auth::guard('medecin')->user();
-        if (!$medecin) return response()->json(['error' => 'Médecin non authentifié'], 401);
+        if (!$medecin) {
+            return response()->json(['error' => 'Médecin non authentifié'], 401);
+        }
 
         $appointment = Appointment::where('id', $id)
             ->where('medecin_id', $medecin->id)
+            ->with(['patient', 'medecin']) // ✅ Charger aussi medecin
             ->first();
 
-        if (!$appointment) return response()->json(['error' => 'Rendez-vous non trouvé'], 404);
-        if ($appointment->status !== 'en_attente') return response()->json(['error' => 'Rendez-vous déjà traité'], 422);
+        if (!$appointment) {
+            return response()->json(['error' => 'Rendez-vous non trouvé'], 404);
+        }
 
-        $appointment->update([
-            'status' => 'refusé',
-            'rejected_at' => now(),
-            'rejection_reason' => $request->reason ?? 'Raison non précisée',
-        ]);
+        // CORRECTION ICI - Utiliser 'en_attente' au lieu de 'en attente'
+        if ($appointment->status !== 'en_attente') {
+            return response()->json(['error' => 'Rendez-vous déjà traité'], 422);
+        }
 
-        return response()->json(['message' => 'Rendez-vous refusé']);
+        DB::beginTransaction();
+        try {
+            $appointment->update(['status' => 'refusé']);
+
+            // Envoyer l'email de refus au patient
+            $emailSent = false;
+            try {
+                \Log::info('Tentative envoi email refus RDV: ' . $appointment->id . ' à ' . $appointment->patient->email);
+
+                // Passer l'objet complet avec les relations chargées
+                Mail::to($appointment->patient->email)->send(new AppointmentRejected($appointment));
+
+                $emailSent = true;
+                \Log::info('Email de refus envoyé avec succès');
+            } catch (\Exception $emailException) {
+                \Log::error('Erreur envoi email refus: ' . $emailException->getMessage());
+                \Log::error('Stack trace: ' . $emailException->getTraceAsString());
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Rendez-vous refusé' . ($emailSent ? '' : ' (Email non envoyé)'),
+                'appointment' => $this->formatAppointmentForDoctor($appointment),
+                'email_sent' => $emailSent
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::error('Erreur refus rendez-vous: ' . $e->getMessage());
+            \Log::error('Stack trace: ' . $e->getTraceAsString());
+            return response()->json(['error' => 'Erreur interne lors du refus du rendez-vous.'], 500);
+        }
     }
+
+    /**
+     * Liste des rendez-vous du médecin connecté
+     */
+    public function indexForDoctor()
+    {
+        try {
+            $medecin = Auth::guard('medecin')->user();
+
+            if (!$medecin) {
+                return response()->json(['error' => 'Médecin non authentifié'], 401);
+            }
+
+            \Log::info('Chargement des rendez-vous pour le médecin: ' . $medecin->id);
+
+            // Récupérer les rendez-vous du médecin avec les informations du patient
+            $appointments = Appointment::where('medecin_id', $medecin->id)
+                ->with('patient') // Charger la relation patient
+                ->latest('date')
+                ->latest('time')
+                ->get();
+
+            \Log::info('Nombre de rendez-vous trouvés: ' . $appointments->count());
+
+            $formattedAppointments = $appointments->map(function ($appointment) {
+                try {
+                    return $this->formatAppointmentForDoctor($appointment);
+                } catch (\Exception $e) {
+                    \Log::error('Erreur formatage rendez-vous ' . $appointment->id . ': ' . $e->getMessage());
+                    return [
+                        'id' => $appointment->id,
+                        'patient_nom' => 'Patient non disponible',
+                        'patient_prenom' => '',
+                        'date' => $appointment->date,
+                        'time' => $appointment->time,
+                        'status' => $appointment->status,
+                        'consultation_type' => $appointment->consultation_type,
+                    ];
+                }
+            });
+
+            return response()->json($formattedAppointments);
+        } catch (\Exception $e) {
+            \Log::error('Erreur dans AppointmentController@indexForDoctor: ' . $e->getMessage());
+            \Log::error('Stack trace: ' . $e->getTraceAsString());
+            return response()->json([
+                'error' => 'Erreur interne du serveur',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 
     /**
      * Annuler un rendez-vous (patient)
@@ -277,7 +413,7 @@ class AppointmentController extends Controller
     private function formatAppointmentForDoctor(Appointment $a)
     {
         $patient = $a->patient;
-        
+
         return [
             'id' => $a->id,
             'patient' => "{$patient->prenom} {$patient->nom}",
