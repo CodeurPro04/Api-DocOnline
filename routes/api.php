@@ -9,6 +9,7 @@ use App\Http\Controllers\MedecinController;
 use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\Api\MedicalChatController;
+use App\Http\Controllers\Auth\GlobalAuthController;
 use App\Http\Controllers\CliniqueController;
 use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\FavoriteController;
@@ -19,6 +20,26 @@ use App\Http\Controllers\FavoriteController;
 Route::get('/user', function (Request $request) {
     return $request->user();
 })->middleware('auth:sanctum');
+
+// Route pour la connexion en global
+Route::post('/login', [GlobalAuthController::class, 'login']);
+
+// Route pour la déconnexion protégée par le middleware
+Route::middleware('auth:sanctum')->post('/logout', [GlobalAuthController::class, 'logout']);
+
+
+Route::middleware('auth:sanctum')->group(function () {
+    // Route pour récupérer tous les utilisateurs
+    Route::get('/users', [GlobalAuthController::class, 'getAllUsers']);
+    // Route pour l'enregistrement d'un nouvel admin
+    Route::post('/users', [GlobalAuthController::class, 'registerAdmin']);
+    // Route pour modifier
+    Route::put('/users/update', [GlobalAuthController::class, 'updateUser']);
+    // Route pour supprimer
+    Route::delete('/users/{id}', [GlobalAuthController::class, 'destroyUser']);
+});
+
+Route::get('/admin/stats/global', [AppointmentController::class, 'getGlobalStats'])->middleware('auth:sanctum');
 
 // Récupérer tous les médecins
 Route::get('/medecins', [MedecinController::class, 'index']);
@@ -58,9 +79,12 @@ Route::prefix('patient')->group(function () {
         Route::put('/profile', [PatientAuthController::class, 'updateProfile']);
         Route::put('/profile/password', [PatientAuthController::class, 'updatePassword']);
         Route::delete('/profile', [PatientAuthController::class, 'deleteAccount']);
+        Route::delete('/{id}', [PatientAuthController::class, 'destroy']);
         Route::get('/appointments', [AppointmentController::class, 'index']);
         Route::post('/appointments', [AppointmentController::class, 'store']);
         Route::delete('/appointments/{id}', [AppointmentController::class, 'cancel']);
+        Route::get('/', [PatientAuthController::class, 'index']);
+        Route::get('/appointments/stats', [AppointmentController::class, 'getStats']);
 
         // Ajouter cette route pour l'upload de photo
         Route::post('/profile/photo', [PatientAuthController::class, 'updatePhoto']);
@@ -85,6 +109,7 @@ Route::prefix('medecin')->group(function () {
         Route::put('/profile', [MedecinAuthController::class, 'updateProfile']);
         Route::put('/profile/password', [MedecinAuthController::class, 'updatePassword']);
         Route::delete('/profile', [MedecinAuthController::class, 'deleteAccount']);
+        Route::delete('/{id}', [MedecinAuthController::class, 'deleteMedecin']);
         Route::post('/profile/photo', [MedecinAuthController::class, 'updatePhoto']);
         Route::put('/working-hours', [MedecinAuthController::class, 'updateWorkingHours']);
         Route::get('/appointments', [AppointmentController::class, 'doctorAppointments']);
@@ -122,7 +147,9 @@ Route::prefix('clinique')->group(function () {
         Route::put('/profile', [CliniqueAuthController::class, 'updateProfile']);
         Route::put('/profile/password', [CliniqueAuthController::class, 'updatePassword']);
         Route::delete('/profile', [CliniqueAuthController::class, 'deleteAccount']);
+        Route::delete('/{id}', [CliniqueAuthController::class, 'destroy']);
         Route::post('/profile/photo', [CliniqueAuthController::class, 'updatePhoto']);
+        Route::get('/', [CliniqueAuthController::class, 'index']);
 
         // Gestion des médecins
         Route::get('/medecins', [CliniqueAuthController::class, 'getMedecins']);

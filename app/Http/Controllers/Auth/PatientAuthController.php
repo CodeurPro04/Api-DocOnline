@@ -16,6 +16,44 @@ use Illuminate\Support\Facades\DB;
 
 class PatientAuthController extends Controller
 {
+    public function index(Request $request)
+    {
+        try {
+            $searchTerm = $request->query('search');
+
+            // On construit la requête de base
+            $query = Patient::query();
+
+            // 1. On applique le filtre de recherche si présent
+            $query->when($searchTerm, function ($q) use ($searchTerm) {
+                return $q->where(function ($innerQuery) use ($searchTerm) {
+                    $innerQuery->where('nom', 'like', '%' . $searchTerm . '%')
+                            ->orWhere('prenom', 'like', '%' . $searchTerm . '%')
+                            ->orWhere('email', 'like', '%' . $searchTerm . '%');
+                });
+            });
+
+            // 2. On trie et on pagine
+            $patients = $query->orderBy('nom', 'asc')->paginate(10);
+
+            // 3. Transformation des données pour l'URL de la photo
+            $patients->getCollection()->transform(function ($patient) {
+                $patient->photo_url = $patient->photo_profil
+                    ? asset('storage/' . $patient->photo_profil)
+                    : null;
+                return $patient;
+            });
+
+            return response()->json($patients, 200);
+
+        } catch (\Exception $e) {
+            \Log::error('Erreur récupération liste patients: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Erreur lors de la récupération des patients',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
     public function register(Request $request)
     {
         $request->validate([
@@ -85,7 +123,8 @@ class PatientAuthController extends Controller
 
     public function updateProfile(Request $request)
     {
-        $patient = $request->user();
+        $patientId = $request->id;
+        $patient = Patient::findOrFail($patientId);
 
         $request->validate([
             'nom' => 'sometimes|string|max:255',
@@ -472,7 +511,7 @@ class PatientAuthController extends Controller
     {
         try {
             $patientId = auth()->id();
-            
+
             $dossier = [
                 'patient' => auth()->user(),
                 'antecedents' => \App\Models\Antecedent::where('patient_id', $patientId)->get(),
@@ -556,5 +595,34 @@ class PatientAuthController extends Controller
     public function getDossierMedicalComplet(Request $request)
     {
         return $this->getDossierMedical($request);
+    }
+
+    public function destroy($id)
+    {
+        try {
+            $patient = Patient::find($id);
+
+            if (!$patient) {
+                return response()->json([
+                    'message' => 'Patient non trouvé'
+                ], 404);
+            }
+
+            if ($patient->photo_profil) {
+                Storage::disk('public')->delete($patient->photo_profil);
+            }
+
+            $patient->delete();
+
+            return response()->json([
+                'message' => 'Le compte patient a été supprimé avec succès'
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erreur lors de la suppression',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 }
